@@ -1,11 +1,11 @@
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    res.setHeader("Allow", ["POST"]);
+    res.setHeader('Allow', ['POST']);
     return res.status(405).end(`Method ${req.method} Not Allowed`);
   }
 
   try {
-    // Manually parse body from raw stream
+    // 🔒 Manually read and parse body
     const buffers = [];
     for await (const chunk of req) {
       buffers.push(chunk);
@@ -49,11 +49,11 @@ export default async function handler(req, res) {
       return res.status(geminiResponse.status).json({ error: data });
     }
 
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "No insights found.";
-    res.status(200).json({ insights: text });
+    const insights = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "No insights found";
+    return res.status(200).json({ insights });
 
   } catch (error) {
-    console.error("Server error:", error);
-    res.status(500).json({ error: error.message || "Internal server error" });
+    console.error("❌ Server error:", error);
+    return res.status(500).json({ error: error.message || "Internal Server Error" });
   }
 }
