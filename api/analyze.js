@@ -1,101 +1,66 @@
-// ✅ code.ts
-figma.showUI(__html__, { width: 360, height: 360 });
+// ✅ analyze.js
+export default async function handler(req, res) {
+  // ✅ CORS headers for all requests
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
 
-figma.ui.onmessage = async (msg) => {
-  if (msg.type === 'request-image-data') {
-    const selection = figma.currentPage.selection;
-    if (selection.length !== 1 || selection[0].type !== 'FRAME') {
-      figma.ui.postMessage({
-        type: 'analysis-error',
-        error: 'Select exactly one FRAME.'
-      });
-      return;
-    }
-
-    try {
-      const frame = selection[0] as FrameNode;
-      const image = await frame.exportAsync({
-        format: 'PNG',
-        constraint: { type: 'SCALE', value: 1 }
-      });
-      const base64 = uint8ArrayToBase64(image);
-      const imageDataUrl = `data:image/png;base64,${base64}`;
-      figma.ui.postMessage({ type: 'send-image-data', imageDataUrl });
-    } catch {
-      figma.ui.postMessage({
-        type: 'analysis-error',
-        error: 'Failed to export frame image.'
-      });
-    }
+  // ✅ Handle preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
   }
 
-  if (msg.type === 'send-to-server') {
-    const imageBase64 = msg.imageDataUrl.split(',')[1];
+  if (req.method !== 'POST') {
+    return res.status(405).end(`Method ${req.method} Not Allowed`);
+  }
 
-    try {
-      console.log("👉 Sending to Gemini proxy...");
-      const response = await fetch("https://gemini-vercel-8alwjcj2f-inderjeets-projects-bfa6dfe6.vercel.app/api/analyze", {
+  try {
+    let body = "";
+    for await (const chunk of req) {
+      body += chunk;
+    }
+
+    const { imageBase64, prompt } = JSON.parse(body);
+
+    if (!imageBase64 || !prompt) {
+      return res.status(400).json({ error: "Missing imageBase64 or prompt" });
+    }
+
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          imageBase64,
-          prompt: "Please analyze this UI for UX improvements."
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  inline_data: {
+                    mime_type: "image/png",
+                    data: imageBase64
+                  }
+                },
+                { text: prompt }
+              ]
+            }
+          ]
         })
-      });
-      console.log("✅ Received response from Gemini proxy");
-
-      let data;
-      try {
-        data = await response.json();
-      } catch (jsonErr) {
-        figma.ui.postMessage({
-          type: 'analysis-error',
-          error: 'Failed to parse JSON response.'
-        });
-        return;
       }
+    );
 
-      if (data.error) {
-        figma.ui.postMessage({
-          type: 'analysis-error',
-          error: JSON.stringify(data.error)
-        });
-      } else {
-        figma.ui.postMessage({
-          type: 'analysis-result',
-          insights: data.insights
-        });
-      }
-    } catch (err: any) {
-      figma.ui.postMessage({
-        type: 'analysis-error',
-        error: err.message
-      });
+    const data = await geminiRes.json();
+
+    if (!geminiRes.ok) {
+      return res.status(geminiRes.status).json({ error: data });
     }
-  }
-};
 
-function uint8ArrayToBase64(uint8Arr: Uint8Array): string {
-  const base64abc = [
-    'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P',
-    'Q','R','S','T','U','V','W','X','Y','Z',
-    'a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p',
-    'q','r','s','t','u','v','w','x','y','z',
-    '0','1','2','3','4','5','6','7','8','9',
-    '+','/'
-  ];
-  let result = '';
-  let i;
-  const l = uint8Arr.length;
-  for (i = 0; i < l; i += 3) {
-    const a = uint8Arr[i];
-    const b = i + 1 < l ? uint8Arr[i + 1] : 0;
-    const c = i + 2 < l ? uint8Arr[i + 2] : 0;
-    const triplet = (a << 16) + (b << 8) + c;
-    result += base64abc[(triplet >> 18) & 0x3F];
-    result += base64abc[(triplet >> 12) & 0x3F];
-    result += i + 1 < l ? base64abc[(triplet >> 6) & 0x3F] : '=';
-    result += i + 2 < l ? base64abc[triplet & 0x3F] : '=';
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "No insights found.";
+    return res.status(200).json({ insights: text });
+
+  } catch (error) {
+    console.error("❌ Server error:", error);
+    return res.status(500).json({ error: error.message || "Internal Server Error" });
   }
-  return result;
 }
