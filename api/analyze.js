@@ -8,7 +8,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Manually read the body (Vercel doesn’t parse it automatically)
     let body = "";
     for await (const chunk of req) {
       body += chunk;
