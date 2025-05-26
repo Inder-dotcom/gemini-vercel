@@ -1,16 +1,16 @@
 // ✅ analyze.js
-
 export default async function handler(req, res) {
+  // ✅ CORS headers for all requests
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
 
+  // ✅ Handle preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  // ...rest of your handler code
-if (req.method !== 'POST') {
+  if (req.method !== 'POST') {
     return res.status(405).end(`Method ${req.method} Not Allowed`);
   }
 
@@ -42,7 +42,10 @@ if (req.method !== 'POST') {
                     data: imageBase64
                   }
                 },
-                { text: prompt }
+                {
+                  text: prompt +
+                    "\n\nGive detailed UX, visual, and usability suggestions for this UI."
+                }
               ]
             }
           ]
@@ -63,5 +66,4 @@ if (req.method !== 'POST') {
     console.error("❌ Server error:", error);
     return res.status(500).json({ error: error.message || "Internal Server Error" });
   }
-
 }
