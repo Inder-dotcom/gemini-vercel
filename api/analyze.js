@@ -1,74 +1,73 @@
-import { GoogleGenAI, Modality } from "@google/genai";
-
-// Main Vercel API Handler
 export default async function handler(req, res) {
-  // --- CORS Headers ---
+  // --- CORS Setup (Essential for Vercel functions accessed by Figma) ---
+  // Handle OPTIONS preflight request (browser sends this first)
   if (req.method === 'OPTIONS') {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
-    return res.status(200).end();
+    res.setHeader("Access-Control-Allow-Origin", "*"); // Allow requests from any origin (Figma plugin's origin is null)
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS"); // Allow POST and OPTIONS methods
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept"); // Allow these headers
+    return res.status(200).end(); // Respond to preflight successfully
   }
 
+  // Set CORS headers for the actual POST request
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST");
+  res.setHeader("Access-Control-Allow-Methods", "POST"); // Explicitly allow POST
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
 
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method Not Allowed" });
+  // --- Request Method Check ---
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
   }
 
-  const { prompt, imageBase64 } = req.body;
-
-  if (!prompt) {
-    return res.status(400).json({ error: "Missing prompt" });
-  }
-
+  // --- Main Logic: Calling Gemini API ---
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const { imageBase64, prompt } = req.body;
 
-    // Prepare the contents array
-    const contents = [];
-    if (imageBase64) {
-      contents.push({
-        inlineData: {
-          mimeType: "image/png",
-          data: imageBase64,
-        },
-      });
-    }
-    contents.push({ text: prompt });
-
-    const response = await ai.models.generateContent({
-      model: imageBase64
-        ? "gemini-2.0-flash-preview-image-generation"
-        : "gemini-1.5-flash",
-      contents,
-      config: {
-        responseModality: imageBase64 ? Modality.IMAGE : Modality.TEXT,
-        responseMimeType: "image/png",
-      },
-    });
-
-    const parts = response.candidates?.[0]?.content?.parts;
-
-    if (!parts || parts.length === 0) {
-      return res.status(500).json({ error: "No response from Gemini." });
+    // Basic validation
+    if (!imageBase64 || !prompt) {
+      return res.status(400).json({ error: "Missing imageBase64 or prompt" });
     }
 
-    for (const part of parts) {
-      if (part.inlineData?.data) {
-        // Image was returned
-        return res.status(200).json({ base64Image: part.inlineData.data });
-      } else if (part.text) {
-        // Text insight returned
-        return res.status(200).json({ insights: part.text });
+    // Call the Gemini API
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  inline_data: {
+                    mime_type: "image/png", // Ensure this matches your image format
+                    data: imageBase64
+                  }
+                },
+                { text: prompt }
+              ]
+            }
+          ]
+        })
       }
+    );
+
+    const result = await geminiRes.json(); // Parse Gemini's response
+
+    // Check if the Gemini API call itself was successful
+    if (!geminiRes.ok) {
+      // If Gemini returned an error, relay that error back to the client (Figma plugin)
+      console.error("❌ Gemini API returned an error:", geminiRes.status, result);
+      return res.status(geminiRes.status).json({ error: result.error?.message || "Error from Gemini API" });
     }
 
-    return res.status(500).json({ error: "Unexpected Gemini response format." });
-  } catch (err) {
-    console.error("Gemini Error:", err);
-    return res.status(500).json({ error: err.message || "Internal server error." });
+    // Extract insights from Gemini's successful response
+    const insights = result?.candidates?.[0]?.content?.parts?.[0]?.text ?? "No insights found.";
+    return res.status(200).json({ insights }); // Send insights back to Figma plugin
+
+  } catch (error) {
+    // Catch any network errors or other exceptions during the process
+    console.error("❌ Server error during Gemini call:", error);
+    return res.status(500).json({ error: error.message || "Internal Server Error" });
   }
 }
