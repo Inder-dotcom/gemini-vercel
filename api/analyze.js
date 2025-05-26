@@ -1,33 +1,27 @@
-// ✅ analyze.js
 export default async function handler(req, res) {
-  // ✅ CORS headers for all requests
+  // ✅ Add CORS headers
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  // ✅ Handle preflight
+  // ✅ Preflight response
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).end(`Method ${req.method} Not Allowed`);
+    return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
   }
 
   try {
-    let body = "";
-    for await (const chunk of req) {
-      body += chunk;
-    }
-
-    const { imageBase64, prompt } = JSON.parse(body);
+    const { imageBase64, prompt } = req.body;
 
     if (!imageBase64 || !prompt) {
       return res.status(400).json({ error: "Missing imageBase64 or prompt" });
     }
 
     const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -42,10 +36,7 @@ export default async function handler(req, res) {
                     data: imageBase64
                   }
                 },
-                {
-                  text: prompt +
-                    "\n\nGive detailed UX, visual, and usability suggestions for this UI."
-                }
+                { text: prompt }
               ]
             }
           ]
@@ -53,14 +44,14 @@ export default async function handler(req, res) {
       }
     );
 
-    const data = await geminiRes.json();
+    const result = await geminiRes.json();
 
     if (!geminiRes.ok) {
-      return res.status(geminiRes.status).json({ error: data });
+      return res.status(geminiRes.status).json({ error: result });
     }
 
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "No insights found.";
-    return res.status(200).json({ insights: text });
+    const insights = result?.candidates?.[0]?.content?.parts?.[0]?.text ?? "No insights found.";
+    return res.status(200).json({ insights });
 
   } catch (error) {
     console.error("❌ Server error:", error);
